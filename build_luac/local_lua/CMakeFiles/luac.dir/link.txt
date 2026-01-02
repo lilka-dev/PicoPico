@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/luac.dir/__/lua/luac.cpp.o -o luac  lib_local_lua_lib.a 

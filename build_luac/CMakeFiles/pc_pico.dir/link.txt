@@ -1,0 +1,1 @@
+/usr/bin/c++  -pg -fsingle-precision-constant -Wall -Wshadow -Wundef -fsanitize=address  -pg CMakeFiles/pc_pico.dir/src/entrypoint.cpp.o -o pc_pico  -Wl,-rpath,/home/yevhen/PicoPico/build_luac/SDL:/home/yevhen/PicoPico/build_luac/SDL_mixer lua/libmy_lua_lib.a SDL/libSDL2-2.0.so.0.22.0 SDL/libSDL2main.a SDL_mixer/libSDL2_mixer-2.0.so.0.500.0 

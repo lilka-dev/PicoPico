@@ -61,21 +61,17 @@ static inline void arduino_delay(uint32_t ms) { delay(ms); }
 #undef C1
 #endif
 
-// Also handle the enum issue - some ESP32 toolchains have issues with this
-// The 'enum' keyword can conflict when followed by '{' in some macro expansions
-
-// Define LUA_LIB to get the print macros
-#define LUA_LIB 1
-
-// Define LUA_CORE to get the arithmetic macros
-#define LUA_CORE 1
-
-// Define lobject_c and lvm_c to get luai_nummod and luai_numpow
-#define lobject_c 1
-#define lvm_c 1
+// Define these macros BEFORE including Lua sources so luaconf.h will
+// conditionally define luai_writestring, luai_nummod, etc.
+// These must be defined without values to match how Lua source files define them
+#define LUA_LIB
+#define LUA_CORE
+#define lobject_c
+#define lvm_c
 
 // Include stdio for Lua's print functions
 #include <cstdio>
+#include <math.h>
 
 #include <lilka.h>
 
