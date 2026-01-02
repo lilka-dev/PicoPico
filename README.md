@@ -47,6 +47,38 @@ https://github.com/DavidVentura/PicoPico/assets/3650670/8b1ce7c6-c577-427d-8bed-
 https://github.com/DavidVentura/PicoPico/assets/3650670/648f5ae0-5fe0-4eac-8bdf-cbaad8db8e8a
 
 
+### On Lilka
+
+Lilka is a Ukrainian DIY handheld game console based on ESP32-S3.
+More info: https://docs.lilka.dev/
+
+#### Build for Lilka
+
+Requirements:
+- PlatformIO CLI or VS Code with PlatformIO extension
+- Lilka v2 hardware
+
+```bash
+# Install PlatformIO CLI (if not already installed)
+pip install platformio
+
+# Build for Lilka
+cd lilka
+pio run
+
+# Upload to device
+pio run --target upload
+
+# Monitor serial output
+pio device monitor
+```
+
+Button mapping on Lilka:
+- D-Pad: Movement (Left, Right, Up, Down)
+- A button: PICO-8 O/Z button
+- B button: PICO-8 X button
+- Start: Menu
+- Select: Pause
 
 
 ## Hardware

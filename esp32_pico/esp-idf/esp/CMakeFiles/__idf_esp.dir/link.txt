@@ -1,0 +1,2 @@
+/home/yevhen/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-ar qc libesp.a CMakeFiles/__idf_esp.dir/hello_world_main.cpp.obj CMakeFiles/__idf_esp.dir/st7789.c.obj
+/home/yevhen/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-ranlib libesp.a

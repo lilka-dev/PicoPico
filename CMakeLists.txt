@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 
 if(NOT DEFINED BACKEND)
-	message(FATAL_ERROR "You must define the variable BACKEND (to either PICO, ESP32, PC, RAWDRAW, ANDROID, THREEDS or TEST)" )
+	message(FATAL_ERROR "You must define the variable BACKEND (to either PICO, ESP32, PC, RAWDRAW, ANDROID, THREEDS, LILKA or TEST)" )
 endif()
 
 if(BACKEND STREQUAL "PICO")
@@ -12,6 +12,12 @@ add_definitions(-DESP_BACKEND)
 set(EXTRA_COMPONENT_DIRS "esp")
 set(COMPONENTS "esp")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+elseif(BACKEND STREQUAL "LILKA")
+# Lilka uses PlatformIO, this is just a placeholder for documentation
+# Actual build is done via PlatformIO - see lilka/platformio.ini
+add_definitions(-DLILKA_BACKEND)
+message(STATUS "Lilka backend selected - use PlatformIO for actual build")
+message(STATUS "Run: cd lilka && pio run")
 elseif(BACKEND STREQUAL "PC")
 add_definitions(-DSDL_BACKEND)
 elseif(BACKEND STREQUAL "RAWDRAW")

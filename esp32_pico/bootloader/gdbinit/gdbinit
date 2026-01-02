@@ -1,0 +1,2 @@
+source /home/yevhen/PicoPico/esp32_pico/bootloader/gdbinit/symbols
+source /home/yevhen/PicoPico/esp32_pico/bootloader/gdbinit/connect
