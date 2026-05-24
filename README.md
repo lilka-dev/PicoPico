@@ -57,6 +57,7 @@ More info: https://docs.lilka.dev/
 Requirements:
 - PlatformIO CLI or VS Code with PlatformIO extension
 - Lilka v2 hardware
+- Python 3 (to run the pre-build script)
 
 ```bash
 # Install PlatformIO CLI (if not already installed)
@@ -79,6 +80,33 @@ Button mapping on Lilka:
 - B button: PICO-8 X button
 - Start: Menu
 - Select: Pause
+
+#### Loading carts from the SD card (`/Pico8/`)
+
+When the Lilka boots, the firmware now scans the SD card for `.p8`
+cart files at boot:
+
+1. Format the SD card as FAT32 and insert it into the Lilka.
+2. Create a folder called `Pico8` at the **root** of the SD card.
+3. Drop any number of `.p8` cart files into `/Pico8/` (the plain
+   text format that PICO-8 saves; `.p8.png` is **not** supported).
+4. Power on / reboot the Lilka. The cart picker will list every
+   `.p8` file it finds; the carts baked into the firmware are only
+   used as a fallback when the SD card is empty or absent.
+
+Implementation notes:
+
+- The scanner lives in [src/sd_cart_loader.cpp](src/sd_cart_loader.cpp);
+  the runtime `.p8` text parser is in
+  [src/p8_text_parser.cpp](src/p8_text_parser.cpp) and mirrors
+  [scripts/to_c.py](scripts/to_c.py).
+- Cart Lua source is fed to z8lua as text via `luaL_loadbuffer`, so
+  no `luac` is needed on the device.
+- Cart buffers are allocated in PSRAM via `heap_caps_malloc` when
+  available; the previously-selected cart's buffers are released
+  before a new one is loaded.
+- A default of 32 carts is exposed; raise `PICO8_SD_MAX_CARTS` in
+  [src/sd_cart_loader.h](src/sd_cart_loader.h) if you need more.
 
 
 ## Hardware

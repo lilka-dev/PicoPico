@@ -2,6 +2,23 @@
 #include "lua/lua.h"
 #include <stdbool.h>
 #include "engine.c"
+
+// ----- Overridable cart list -------------------------------------------------
+//
+// By default the menu lists the carts baked into the firmware via the
+// generated header (``carts[]``). Backends that can load carts at
+// runtime (e.g. Lilka loading ``.p8`` files from the SD card) reassign
+// these globals during ``init_platform``/``init_video`` and may install
+// ``pico_prepare_cart`` to fully populate the chosen cart on demand.
+
+static GameCart* active_carts       = carts;
+static uint8_t   active_carts_count = sizeof(carts) / sizeof(GameCart);
+
+// Optional hook invoked between the menu selection and ``cartParser``.
+// Must populate ``active_carts[index]`` with valid pointers. Return
+// ``false`` to abort startup.
+static bool (*pico_prepare_cart)(uint8_t index) = NULL;
+
 #if defined(SDL_BACKEND)
 #include "sdl_backend.c"
 #elif defined(PICO_BACKEND)
@@ -21,7 +38,11 @@
 
 int16_t drawMenu() {
     int8_t highlighted = 0;
-    uint8_t cartCount = sizeof(carts)/sizeof(GameCart);
+    uint8_t cartCount = active_carts_count;
+    if (cartCount == 0) {
+        // Nothing to show; bail out immediately so caller can render an error.
+        return -1;
+    }
     uint8_t cartsToShow = 3;
     bool changed = true;
     uint8_t first, last = 0;
@@ -39,22 +60,20 @@ int16_t drawMenu() {
         }
 
         if(changed) {
-            if (carts[highlighted].label_len) {
-                memcpy(&label.sprite_data, carts[highlighted].label, carts[highlighted].label_len);
+            if (active_carts[highlighted].label_len && active_carts[highlighted].label) {
+                memcpy(&label.sprite_data, active_carts[highlighted].label, active_carts[highlighted].label_len);
             } else {
                 memset(&label.sprite_data, 0x1f, sizeof(label.sprite_data));
             }
             gfx_cls(original_palette[0]);
             drawHud();
-            //render_stretched(&label, 0, 0, 128, 128, 32, 0, 64, 64);
             render_stretched(&label, 0, 0, 127, 127, 16, 0, 96, 96);
-            //_render(&label, 0, 0, 0, 0, -1, false, false, 128, 128);
             first = MAX(0, highlighted - cartsToShow/2);
             last = MIN(cartsToShow, cartCount);
             for(uint8_t i=0; i<last; i++) {
                 uint8_t idx = i+first;
                 if (idx >= cartCount) break;
-                _print(carts[idx].name, carts[idx].name_len, 10, 100+i*7, highlighted == idx ? 9 : 7);
+                _print(active_carts[idx].name, active_carts[idx].name_len, 10, 100+i*7, highlighted == idx ? 9 : 7);
             }
             changed = false;
         }
@@ -70,6 +89,10 @@ int16_t drawMenu() {
 
 int pico8() {
     bootup_time = now();
+    if (!init_platform()) {
+        printf("Failed to initialize platform!\n");
+        return 1;
+    }
     if( !init_video() )
     {
         printf( "Failed to initialize video!\n" );
@@ -105,11 +128,16 @@ int pico8() {
     delay(10);
 
     bootup_time = now();
-    printf("Parsing cart %s\n", carts[game].name);
-    cartParser(&carts[game]);
+    if (pico_prepare_cart && !pico_prepare_cart((uint8_t)game)) {
+        printf("Failed to prepare cart %d\n", game);
+        video_close();
+        return 1;
+    }
+    printf("Parsing cart %s\n", active_carts[game].name);
+    cartParser(&active_carts[game]);
 
     printf("init lua \n");
-    bool lua_ok = init_lua(carts[game].code, carts[game].code_len);
+    bool lua_ok = init_lua(active_carts[game].code, active_carts[game].code_len);
     printf("init done \n");
 	if ( !lua_ok ) {
 		printf( "Failed to initialize LUA!\n" );

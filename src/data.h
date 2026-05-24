@@ -7,26 +7,29 @@
 static uint8_t ram[0x5DFF - 0x4300]; // 7KB
 typedef uint8_t  palidx_t;
 typedef uint16_t color_t;
+// Note: members are non-const so backends can fill carts at runtime
+// (e.g. when loading .p8 files from an SD card). Static aggregate
+// initializers in the generated header still work fine.
 struct GameCart {
-    const uint8_t  name_len;
+    uint8_t  name_len;
     const char*    name;
 
-    const uint16_t code_len;
+    uint16_t code_len;
     const uint8_t* code;
 
-    const uint16_t gff_len;
+    uint16_t gff_len;
     const uint8_t* gff;
 
-    const uint16_t gfx_len;
+    uint16_t gfx_len;
     const uint8_t* gfx;
 
-    const uint16_t sfx_len;
+    uint16_t sfx_len;
     const uint8_t* sfx;
 
-    const uint16_t map_len;
+    uint16_t map_len;
     const uint8_t* map;
 
-    const uint16_t label_len;
+    uint16_t label_len;
     const uint8_t* label;
 };
 

@@ -470,23 +470,39 @@ void _replace_palette(uint8_t palIdx, lua_State* L) {
 }
 
 int _lua_pal(lua_State* L) {
-    // TODO: significant functionality missing
-    // https://pico-8.fandom.com/wiki/Pal
+    // PICO-8: https://pico-8.fandom.com/wiki/Pal
+    //   pal()                -> reset palette
+    //   pal({...}, [p])      -> replace palette from table
+    //   pal(c0)              -> reset entry c0 (equivalent to pal(c0,c0))
+    //   pal(c0, c1, [p])     -> remap c0 to c1 in palette p (0=draw, 1=display)
+    //   any of c0/c1 may be nil -> treat as "reset"
     uint8_t argcount = lua_gettop(L);
     if (argcount == 0) {
         memcpy(pal_map, orig_pal_map, sizeof(orig_pal_map));
         reset_transparency();
         return 0;
     }
-    if(lua_istable(L, 1)) {
+    if (lua_istable(L, 1)) {
         uint8_t palIdx = luaL_optinteger(L, 2, 0);
         _replace_palette(palIdx, L);
         return 0;
     }
 
-    const uint8_t origIdx = luaL_checkinteger(L, 1);
-    const uint8_t newIdx = luaL_checkinteger(L, 2);
-    pal_map[origIdx] = newIdx;
+    // If c0 itself is nil/missing, behave like pal() (full reset) rather than
+    // raising a Lua error (some carts call pal(maybe_nil) every frame).
+    if (lua_isnoneornil(L, 1)) {
+        memcpy(pal_map, orig_pal_map, sizeof(orig_pal_map));
+        reset_transparency();
+        return 0;
+    }
+
+    int origIdx = luaL_optinteger(L, 1, 0);
+    // c1 nil/absent -> reset that entry (PICO-8 behavior).
+    int newIdx  = luaL_optinteger(L, 2, origIdx);
+    // 3rd arg is the palette flag (0=draw, 1=display); we only emulate draw.
+    // Bounds-check to avoid writing past pal_map[16].
+    if (origIdx < 0 || origIdx >= (int)sizeof(pal_map)) return 0;
+    pal_map[origIdx] = (uint8_t)(newIdx & 0x0f);
     return 0;
 }
 
@@ -654,14 +670,19 @@ uint8_t btn(lua_State* L, uint8_t* _buttons) {
 	    bitfield |= ((_buttons[i]) << i);
 	}
     	return bitfield;
-    } else if (argcount == 1) {
+    } else if (argcount >= 1) {
     	int idx = luaL_optinteger(L, 1, -1);
 	if(idx==-1) return 0;
+	// Optional 2nd arg is the player index. We only emulate player 0
+	// (PICO-8's primary player). Player 1+ has no input mapped.
+	if (argcount >= 2) {
+	    int player = luaL_optinteger(L, 2, 0);
+	    if (player != 0) return 0;
+	}
+	if (idx < 0 || idx >= 6) return 0;
     	return _buttons[idx];
-    } else {
-	printf("Unsupported btn/btnp with 2 args\n");
-    	return 0;
     }
+    return 0;
 }
 int _lua_btnp(lua_State* L) {
     uint8_t argcount = lua_gettop(L);
@@ -673,8 +694,12 @@ int _lua_btnp(lua_State* L) {
     return 1;
 }
 int _lua_btn(lua_State* L) {
+    uint8_t argcount = lua_gettop(L);
+    if (argcount == 0) {
+        lua_pushinteger(L, btn(L, buttons));
+        return 1;
+    }
     lua_pushboolean(L, btn(L, buttons));
-    // printf("Button state for %d is %d\n", idx, buttons[idx]);
     return 1;
 }
 

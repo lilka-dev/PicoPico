@@ -16,20 +16,24 @@
 #include <lilka.h>
 #include "data.h"
 #include "engine.c"
+#include "sd_cart_loader.cpp"
 
-// Lilka display is 280x240, PICO-8 is 128x128
-// We'll scale and center the display
-#define LILKA_WIDTH  280
-#define LILKA_HEIGHT 240
+// Lilka display is 280x240. PICO-8 native res is 128x128.
+// We upscale to a 240x240 square (centered horizontally, top-aligned)
+// using nearest-neighbor sampling.
+#define LILKA_WIDTH   280
+#define LILKA_HEIGHT  240
 
-// Calculate scaling and offset for centering
-// Using integer scaling factor of 1 (128x128 fits in 240x240 with room)
-// Or we can scale up to fill more of the screen
-#define SCALE_FACTOR 1  // Can be 1 or 2 (2 would be 256x256, too big)
-#define OFFSET_X ((LILKA_WIDTH - SCREEN_WIDTH * SCALE_FACTOR) / 2)
-#define OFFSET_Y ((LILKA_HEIGHT - SCREEN_HEIGHT * SCALE_FACTOR) / 2)
+#define PICO_OUT_W    240
+#define PICO_OUT_H    240
+#define OFFSET_X      ((LILKA_WIDTH  - PICO_OUT_W) / 2)   // 20
+#define OFFSET_Y      ((LILKA_HEIGHT - PICO_OUT_H) / 2)   // 0
 
-// Frame buffer for the scaled output
+// Pre-computed source-pixel lookup tables (filled in init_video()).
+static uint8_t xmap[PICO_OUT_W];
+static uint8_t ymap[PICO_OUT_H];
+
+// Frame buffer for the scaled output (allocated in PSRAM via Canvas)
 static lilka::Canvas* canvas = nullptr;
 
 // Previous button state for edge detection
@@ -41,23 +45,54 @@ static TaskHandle_t audioTaskHandle = nullptr;
 // HUD buffer (if using HUD feature)
 extern uint8_t hud_buffer[];
 
+// Forward decls of the overridable cart-list globals defined in main.cpp
+// (this file is #included into the same translation unit).
+extern GameCart* active_carts;
+extern uint8_t   active_carts_count;
+extern bool    (*pico_prepare_cart)(uint8_t index);
+
+static bool lilka_prepare_cart(uint8_t index) {
+    return sd_load_selected_cart(index);
+}
+
 bool init_platform() {
-    // Lilka initialization is handled in main setup()
+    // Scan the SD card for .p8 files in /Pico8/. If we find any, use
+    // them as the active cart list; otherwise fall back to the carts
+    // baked into the firmware so the device is still usable.
+    uint8_t n = sd_scan_carts();
+    if (n > 0) {
+        active_carts       = sd_get_cart_array();
+        active_carts_count = n;
+        pico_prepare_cart  = lilka_prepare_cart;
+        Serial.printf("[lilka] using %u SD cart(s) from %s\n",
+                      (unsigned)n, PICO8_SD_DIR);
+    } else {
+        Serial.println("[lilka] no SD carts found, using built-in carts");
+    }
     return true;
 }
 
 bool init_video() {
-    // Create canvas for double buffering
-    canvas = new lilka::Canvas(SCREEN_WIDTH, SCREEN_HEIGHT);
+    // Allocate the upscaled output canvas (240*240*2 = 112.5 KiB).
+    // lilka::Canvas allocates in PSRAM on Lilka v2.
+    canvas = new lilka::Canvas(PICO_OUT_W, PICO_OUT_H);
     if (!canvas) {
         Serial.println("Failed to create canvas");
         return false;
     }
-    
+
+    // Build nearest-neighbor lookup tables once.
+    for (int i = 0; i < PICO_OUT_W; ++i) {
+        xmap[i] = (uint8_t)((i * SCREEN_WIDTH)  / PICO_OUT_W);
+    }
+    for (int i = 0; i < PICO_OUT_H; ++i) {
+        ymap[i] = (uint8_t)((i * SCREEN_HEIGHT) / PICO_OUT_H);
+    }
+
     // Clear the display
     lilka::display.fillScreen(lilka::colors::Black);
-    
-    Serial.println("Video initialized for Lilka");
+
+    Serial.println("Video initialized for Lilka (240x240 upscaled)");
     return true;
 }
 
@@ -70,38 +105,42 @@ void video_close() {
 
 void gfx_flip() {
     if (!canvas) return;
-    
-    // Convert PICO-8 framebuffer to Lilka canvas
+
     uint16_t* fb = canvas->getFramebuffer();
-    
-    for (uint8_t y = 0; y < SCREEN_HEIGHT; y++) {
-        for (uint8_t x = 0; x < SCREEN_WIDTH; x++) {
-            palidx_t p = get_pixel(x, y);
-            color_t c = palette[p];
-            fb[y * SCREEN_WIDTH + x] = c;
+
+    // Nearest-neighbor upscale 128x128 -> 240x240.
+    for (uint16_t dy = 0; dy < PICO_OUT_H; ++dy) {
+        const uint8_t sy = ymap[dy];
+        uint16_t* row = fb + (uint32_t)dy * PICO_OUT_W;
+        for (uint16_t dx = 0; dx < PICO_OUT_W; ++dx) {
+            palidx_t p = get_pixel(xmap[dx], sy);
+            row[dx] = palette[p];
         }
     }
-    
-    // Draw the canvas to the display, centered
+
     lilka::display.draw16bitRGBBitmap(
         OFFSET_X, OFFSET_Y,
-        canvas->getFramebuffer(),
-        SCREEN_WIDTH, SCREEN_HEIGHT
+        fb,
+        PICO_OUT_W, PICO_OUT_H
     );
 }
 
 void draw_hud() {
 #ifdef HUD_HEIGHT
-    // Draw HUD at bottom of screen
-    // Convert HUD buffer and draw it
-    for (uint8_t y = 0; y < HUD_HEIGHT; y++) {
-        for (uint8_t x = 0; x < SCREEN_WIDTH; x++) {
-            uint8_t idx = y * SCREEN_WIDTH + x;
-            uint8_t p = hud_buffer[idx];
-            color_t c = palette[p];
+    // HUD is a SCREEN_WIDTH x HUD_HEIGHT strip; stretch it across the
+    // bottom of the 240x240 output area using the same nearest-neighbor
+    // scheme. Width scales horizontally to PICO_OUT_W.
+    const uint16_t hud_dst_h = (uint16_t)((HUD_HEIGHT * PICO_OUT_H) / SCREEN_HEIGHT);
+    if (hud_dst_h == 0) return;
+    for (uint16_t dy = 0; dy < hud_dst_h; ++dy) {
+        const uint8_t sy = (uint8_t)((dy * HUD_HEIGHT) / hud_dst_h);
+        for (uint16_t dx = 0; dx < PICO_OUT_W; ++dx) {
+            const uint8_t sx = xmap[dx];
+            const uint8_t p = hud_buffer[sy * SCREEN_WIDTH + sx];
+            const color_t c = palette[p];
             lilka::display.drawPixel(
-                OFFSET_X + x,
-                OFFSET_Y + SCREEN_HEIGHT + y,
+                OFFSET_X + dx,
+                OFFSET_Y + PICO_OUT_H - hud_dst_h + dy,
                 c
             );
         }
@@ -127,24 +166,38 @@ bool handle_input() {
         buttons_prev[i] = buttons[i];
     }
     
-    // Map Lilka buttons to PICO-8 buttons
-    // PICO-8: Left, Right, Up, Down, A (O/Z), B (X/X)
-    buttons[BTN_IDX_LEFT]  = state.left.pressed ? 1 : 0;
+    // Map Lilka buttons to PICO-8 buttons.
+    // PICO-8 P1 has 6 buttons: Left, Right, Up, Down, O (4), X (5).
+    // Lilka has UP/DOWN/LEFT/RIGHT, A, B, C, D, SELECT, START.
+    // A and C both act as PICO-8 O (button 4).
+    // B and D both act as PICO-8 X (button 5).
+    // START or SELECT exits the cart back to the picker.
+    buttons[BTN_IDX_LEFT]  = state.left.pressed  ? 1 : 0;
     buttons[BTN_IDX_RIGHT] = state.right.pressed ? 1 : 0;
-    buttons[BTN_IDX_UP]    = state.up.pressed ? 1 : 0;
-    buttons[BTN_IDX_DOWN]  = state.down.pressed ? 1 : 0;
-    buttons[BTN_IDX_A]     = state.a.pressed ? 1 : 0;  // Lilka A -> PICO-8 O/Z
-    buttons[BTN_IDX_B]     = state.b.pressed ? 1 : 0;  // Lilka B -> PICO-8 X
-    
-    // Calculate "just pressed" for menu navigation
-    buttons_frame[BTN_IDX_LEFT]  = state.left.justPressed ? 1 : 0;
+    buttons[BTN_IDX_UP]    = state.up.pressed    ? 1 : 0;
+    buttons[BTN_IDX_DOWN]  = state.down.pressed  ? 1 : 0;
+    buttons[BTN_IDX_A]     = (state.a.pressed || state.c.pressed) ? 1 : 0;
+    buttons[BTN_IDX_B]     = (state.b.pressed || state.d.pressed) ? 1 : 0;
+
+    // "Just pressed" flags for btnp() and menu navigation.
+    buttons_frame[BTN_IDX_LEFT]  = state.left.justPressed  ? 1 : 0;
     buttons_frame[BTN_IDX_RIGHT] = state.right.justPressed ? 1 : 0;
-    buttons_frame[BTN_IDX_UP]    = state.up.justPressed ? 1 : 0;
-    buttons_frame[BTN_IDX_DOWN]  = state.down.justPressed ? 1 : 0;
-    buttons_frame[BTN_IDX_A]     = state.a.justPressed ? 1 : 0;
-    buttons_frame[BTN_IDX_B]     = state.b.justPressed ? 1 : 0;
-    
-    return false; // Don't quit
+    buttons_frame[BTN_IDX_UP]    = state.up.justPressed    ? 1 : 0;
+    buttons_frame[BTN_IDX_DOWN]  = state.down.justPressed  ? 1 : 0;
+    buttons_frame[BTN_IDX_A]     = (state.a.justPressed || state.c.justPressed) ? 1 : 0;
+    buttons_frame[BTN_IDX_B]     = (state.b.justPressed || state.d.justPressed) ? 1 : 0;
+
+    // START / SELECT: quit cart -> back to picker (via reboot for a clean reset).
+    // Skip the first few polls: the controller task initialisation right after
+    // lilka::begin() can emit a spurious justPressed on its first getState().
+    static uint8_t input_warmup = 30; // ~1 second at 30 FPS
+    if (input_warmup > 0) {
+        input_warmup--;
+    } else if (state.start.justPressed || state.select.justPressed) {
+        return true; // signals engine to set wants_to_quit
+    }
+
+    return false;
 }
 
 uint32_t now() {

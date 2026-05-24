@@ -119,43 +119,36 @@ static inline void arduino_delay(uint32_t ms) { delay(ms); }
 void setup() {
     // Initialize Lilka hardware (display, buttons, audio, SD card, etc.)
     lilka::begin();
-    
-    // Print startup message
+
     Serial.println("PicoPico PICO-8 Emulator for Lilka");
     Serial.println("Starting...");
-    
-    // Show a brief splash screen
+
+    // Clear screen before starting (no splash)
     lilka::display.fillScreen(lilka::colors::Black);
-    lilka::display.setTextColor(lilka::colors::White);
-    lilka::display.setFont(FONT_10x20);
-    lilka::display.setCursor(60, 100);
-    lilka::display.println("PicoPico");
-    lilka::display.setCursor(40, 130);
-    lilka::display.setFont(FONT_6x13);
-    lilka::display.println("PICO-8 Emulator");
-    
-    arduino_delay(1000);  // Use saved Arduino delay
-    
-    // Clear screen before starting
-    lilka::display.fillScreen(lilka::colors::Black);
-    
+
     // Run the PICO-8 emulator main function
     int result = pico8();
-    
+
     if (result != 0) {
         // Error occurred, display message
         lilka::display.fillScreen(lilka::colors::Dark_red);
         lilka::display.setTextColor(lilka::colors::White);
         lilka::display.setCursor(20, 120);
         lilka::display.println("Error starting emulator");
+        return;
     }
+
+    // pico8() returned cleanly (Start/Select pressed inside a cart, or picker
+    // cancelled). Reboot so the picker comes back with a fresh engine state.
+    arduino_delay(100);
+    ESP.restart();
 }
 
 void loop() {
-    // The main game loop runs in pico8() called from setup()
-    // If we get here, restart
-    arduino_delay(100);  // Use saved Arduino delay
-    
+    // Fallback: if we ever land here (e.g. after an error screen), any button
+    // press reboots back into the picker.
+    arduino_delay(100);
+
     lilka::State state = lilka::controller.getState();
     if (state.any.justPressed) {
         ESP.restart();
